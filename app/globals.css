@@ -70,3 +70,66 @@ body {
     @apply bg-background text-foreground;
   }
 }
+
+@layer components {
+  .fade-in {
+    @apply opacity-0 animate-[fadeIn_0.3s_ease-in-out_forwards];
+  }
+  
+  .slide-up {
+    @apply transform translate-y-4 opacity-0 animate-[slideUp_0.3s_ease-out_forwards];
+  }
+  
+  .floating-action-button {
+    @apply fixed bottom-6 right-6 p-4 rounded-full shadow-lg 
+           bg-blue-500 text-white hover:bg-blue-600 
+           transform transition-all hover:scale-110 
+           active:scale-95 z-50;
+  }
+  
+  .dark {
+    @apply bg-gray-900 text-gray-100;
+  }
+
+  .glassmorphism {
+    @apply bg-white/80 dark:bg-gray-800/80 backdrop-blur-lg;
+  }
+  
+  .card-hover {
+    @apply transition-all duration-300 hover:translate-y-[-2px] hover:shadow-lg;
+  }
+  
+  .pulse-animation {
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  .skeleton {
+    @apply animate-pulse bg-gray-200 dark:bg-gray-700 rounded;
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { 
+    transform: translateY(1rem);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .5; }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}

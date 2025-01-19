@@ -44,9 +44,9 @@ app = FastAPI(
 # Update CORS middleware configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["*"],  # For development, update for production
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["*"],
     max_age=3600,
@@ -86,121 +86,86 @@ class DRModel:
             "Severe DR",
             "Proliferative DR"
         ]
-        self.input_shape = (224, 224)  # Changed to 2D tuple
+        self.input_shape = (224, 224)
+        self.model_path = Path(__file__).resolve().parent / 'models' / 'dr_classification_model.h5'
         self.load_model()
 
     def load_model(self):
         """Load the TensorFlow model or use mock model for development"""
         try:
-            python_api_url = os.getenv('NEXT_PUBLIC_PYTHON_API_URL')
-            if not python_api_url:
-                logger.error("Environment variable NEXT_PUBLIC_PYTHON_API_URL not set.")
+            if not self.model_path.exists():
+                logger.warning(f"Model file not found at {self.model_path}. Using mock model.")
                 self.model = "mock"
                 return
 
-            # Define the absolute path to the model file
-            model_path = Path(__file__).resolve().parent / 'dr_classification_model.h5'
-            
-            if not model_path.exists():
-                logger.warning("Using mock model for development")
-                self.model = "mock"  # Just a flag to indicate mock mode
-                return
-
-            # Load the TensorFlow model
-            self.model = tf.keras.models.load_model(str(model_path))
+            logger.info("Loading TensorFlow model...")
+            self.model = tf.keras.models.load_model(str(self.model_path))
             logger.info("Model loaded successfully")
         except Exception as e:
             logger.error(f"Error loading model: {str(e)}")
-            self.model = "mock"  # Fallback to mock mode
+            self.model = "mock"
 
     def preprocess_image(self, image_bytes):
-        """Preprocess image for model input with proper error handling"""
+        """Preprocess image for model input"""
         try:
-            # Read image using PIL first
+            # Convert bytes to PIL Image
             image = Image.open(io.BytesIO(image_bytes))
-            image = image.convert('RGB')  # Ensure RGB
             
-            # Convert to numpy array
-            image_np = np.array(image)
+            # Convert to RGB if needed
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
             
-            # Resize with proper dimension handling
-            image_resized = cv2.resize(image_np, self.input_shape)
+            # Resize
+            image = image.resize(self.input_shape)
             
-            # Normalize to 0-1 range
-            image_normalized = image_resized.astype(np.float32) / 255.0
-            
-            # Apply CLAHE to L channel in LAB color space
-            lab = cv2.cvtColor(image_normalized, cv2.COLOR_RGB2LAB)
-            l, a, b = cv2.split(lab)
-            
-            # Apply CLAHE
-            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
-            l_clahe = clahe.apply(np.uint8(l * 255)) / 255.0
-            
-            # Ensure all channels have the same size and depth
-            l_clahe = l_clahe.astype(np.float32)
-            a = a.astype(np.float32)
-            b = b.astype(np.float32)
-            
-            # Merge channels back
-            enhanced = cv2.merge([l_clahe, a, b])
-            enhanced_rgb = cv2.cvtColor(enhanced, cv2.COLOR_LAB2RGB)
+            # Convert to numpy array and normalize
+            img_array = np.array(image)
+            img_array = img_array.astype('float32') / 255.0
             
             # Add batch dimension
-            preprocessed = np.expand_dims(enhanced_rgb, axis=0)
+            img_array = np.expand_dims(img_array, axis=0)
             
-            return preprocessed
+            return img_array
 
         except Exception as e:
             logger.error(f"Preprocessing error: {str(e)}")
             raise ValueError(f"Error preprocessing image: {str(e)}")
 
     def predict(self, preprocessed_image):
-        """Make prediction using the model or return mock data"""
+        """Make prediction using the model"""
         try:
             start_time = datetime.now()
             
-            # Use mock predictions for development
             if self.model == "mock":
-                import random
-                mock_prediction = [random.random() for _ in range(len(self.severity_labels))]
-                mock_prediction = np.array(mock_prediction)
-                mock_prediction = mock_prediction / mock_prediction.sum()  # Normalize
-                
-                predicted_class = np.argmax(mock_prediction)
-                confidence = float(mock_prediction[predicted_class])
-                
-                processing_time = 0.5  # Mock processing time
-                
-                return {
-                    'severity': self.severity_labels[predicted_class],
-                    'confidence': confidence * 100,  # Convert to percentage
-                    'severity_scores': {
-                        label: float(score) * 100
-                        for label, score in zip(self.severity_labels, mock_prediction)
-                    },
-                    'processing_time': processing_time
-                }
-            
-            # Real model prediction
-            prediction = self.model.predict(preprocessed_image, verbose=0)[0]
+                # Generate mock predictions
+                mock_prediction = np.random.random(len(self.severity_labels))
+                mock_prediction = mock_prediction / mock_prediction.sum()
+                prediction = mock_prediction
+            else:
+                # Real model prediction
+                prediction = self.model.predict(preprocessed_image, verbose=0)[0]
+
+            # Get the predicted class and confidence
             predicted_class = np.argmax(prediction)
             confidence = float(prediction[predicted_class])
-            
-            # Calculate processing time
+
+            # Calculate scores for all classes
+            severity_scores = {
+                label: float(score) * 100
+                for label, score in zip(self.severity_labels, prediction)
+            }
+
             processing_time = (datetime.now() - start_time).total_seconds()
-            
+
             return {
                 'severity': self.severity_labels[predicted_class],
-                'confidence': confidence,
-                'severity_scores': {
-                    label: float(score)
-                    for label, score in zip(self.severity_labels, prediction)
-                },
+                'confidence': confidence * 100,  # Convert to percentage
+                'severity_scores': severity_scores,
                 'processing_time': processing_time
             }
+
         except Exception as e:
-            logger.error(f"Error making prediction: {str(e)}")
+            logger.error(f"Prediction error: {str(e)}")
             raise ValueError(f"Error making prediction: {str(e)}")
 
 # Initialize model
@@ -252,66 +217,40 @@ async def predict_options():
 async def predict_image(file: UploadFile = File(...)):
     """Make prediction for a single image"""
     try:
+        # Log request details
+        logger.info(f"Processing image: {file.filename}")
+        
         # Validate file type
         if not file.content_type.startswith('image/'):
-            return JSONResponse(
+            raise HTTPException(
                 status_code=400,
-                content={
-                    "success": False,
-                    "error": "File must be an image (JPEG, PNG)"
-                }
+                detail="File must be an image (JPEG, PNG)"
             )
         
-        # Read file with size limit
-        MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
-        contents = await file.read(MAX_FILE_SIZE)
+        # Read file
+        contents = await file.read()
         
-        if len(contents) == MAX_FILE_SIZE:
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "success": False,
-                    "error": "File size too large (max 10MB)"
-                }
-            )
-        
-        # Preprocess and predict
+        # Process image and make prediction
         try:
             preprocessed_image = dr_model.preprocess_image(contents)
             result = dr_model.predict(preprocessed_image)
             
             logger.info(f"Successfully processed image: {file.filename}")
+            
             return JSONResponse(
                 content={
                     "success": True,
-                    "data": {
-                        "severity": result['severity'],
-                        "confidence": result['confidence'],
-                        "severity_scores": result['severity_scores'],
-                        "processing_time": result['processing_time']
-                    }
+                    "data": result
                 }
             )
             
         except ValueError as e:
-            logger.error(f"Error processing {file.filename}: {str(e)}")
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "success": False,
-                    "error": str(e)
-                }
-            )
+            logger.error(f"Error processing image: {str(e)}")
+            raise HTTPException(status_code=400, detail=str(e))
             
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}")
-        return JSONResponse(
-            status_code=500,
-            content={
-                "success": False,
-                "error": "Internal server error while processing image"
-            }
-        )
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/batch_predict", tags=["Prediction"], response_model=BatchPredictionResponse)
 async def batch_predict(files: List[UploadFile] = File(...)):
