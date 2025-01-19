@@ -248,15 +248,18 @@ async def model_info():
 async def predict_options():
     return {}
 
-@app.post("/predict", tags=["Prediction"], response_model=PredictionResponse)
+@app.post("/predict", tags=["Prediction"])
 async def predict_image(file: UploadFile = File(...)):
     """Make prediction for a single image"""
     try:
         # Validate file type
         if not file.content_type.startswith('image/'):
-            raise HTTPException(
+            return JSONResponse(
                 status_code=400,
-                detail="File must be an image (JPEG, PNG)"
+                content={
+                    "success": False,
+                    "error": "File must be an image (JPEG, PNG)"
+                }
             )
         
         # Read file with size limit
@@ -264,9 +267,12 @@ async def predict_image(file: UploadFile = File(...)):
         contents = await file.read(MAX_FILE_SIZE)
         
         if len(contents) == MAX_FILE_SIZE:
-            raise HTTPException(
+            return JSONResponse(
                 status_code=400,
-                detail="File size too large (max 10MB)"
+                content={
+                    "success": False,
+                    "error": "File size too large (max 10MB)"
+                }
             )
         
         # Preprocess and predict
@@ -275,17 +281,36 @@ async def predict_image(file: UploadFile = File(...)):
             result = dr_model.predict(preprocessed_image)
             
             logger.info(f"Successfully processed image: {file.filename}")
-            return result
+            return JSONResponse(
+                content={
+                    "success": True,
+                    "data": {
+                        "severity": result['severity'],
+                        "confidence": result['confidence'],
+                        "severity_scores": result['severity_scores'],
+                        "processing_time": result['processing_time']
+                    }
+                }
+            )
             
         except ValueError as e:
             logger.error(f"Error processing {file.filename}: {str(e)}")
-            raise HTTPException(status_code=400, detail=str(e))
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "success": False,
+                    "error": str(e)
+                }
+            )
             
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}")
-        raise HTTPException(
+        return JSONResponse(
             status_code=500,
-            detail="Internal server error while processing image"
+            content={
+                "success": False,
+                "error": "Internal server error while processing image"
+            }
         )
 
 @app.post("/batch_predict", tags=["Prediction"], response_model=BatchPredictionResponse)

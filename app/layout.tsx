@@ -1,15 +1,12 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist } from 'next/font/google';
+// Ensure the import path and named export are correct
+import { AuthProvider } from '../contexts/AuthContext';
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+const geist = Geist({
+  subsets: ['latin'],
+  display: 'swap',
 });
 
 export const metadata: Metadata = {
@@ -23,12 +20,15 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-gray-50`}
-      >
-        {children}
+    <html lang="en" className={geist.className}>
+      <body className="min-h-screen bg-gray-50">
+        <AuthProvider>
+          <main className="container mx-auto px-4 py-8">
+            {children}
+          </main>
+        </AuthProvider>
       </body>
     </html>
   );
 }
+

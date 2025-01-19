@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-export async function POST(request: NextRequest) {
+export async function POST(req: NextRequest) {
   try {
-    const formData = await request.formData();
-    const file = formData.get('file') as File | null;
-
+    const formData = await req.formData();
+    const file = formData.get('file') as File;
+    
     if (!file) {
       return NextResponse.json(
         { success: false, error: 'No file provided' },
@@ -12,41 +12,44 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const pythonApiUrl = process.env.NEXT_PUBLIC_PYTHON_API_URL || 'http://localhost:8000';
+    
     const pythonFormData = new FormData();
     pythonFormData.append('file', file);
 
-    const pythonApiUrl = process.env.NEXT_PUBLIC_PYTHON_API_URL;
-    if (!pythonApiUrl) {
-      console.error('NEXT_PUBLIC_PYTHON_API_URL is not configured');
-      return NextResponse.json(
-        { success: false, error: 'API configuration error' },
-        { status: 500 }
-      );
-    }
-
-    const response = await fetch(pythonApiUrl, {
+    const response = await fetch(`${pythonApiUrl}/predict`, {
       method: 'POST',
-      headers: {
-        'Accept': 'application/json',
-      },
       body: pythonFormData,
     });
 
-    const data = await response.json();
-    
-    if (!response.ok) {
-      console.error('Python API error:', data);
+    const result = await response.json();
+
+    // Handle successful response but with error details
+    if (result.error || !result.severity) {
       return NextResponse.json(
-        { success: false, error: data.detail || 'API Error' },
-        { status: response.status }
+        { success: false, error: result.error || 'Invalid response format' },
+        { status: 400 }
       );
     }
 
-    return NextResponse.json({ success: true, result: data });
+    // Return successful response with prediction data
+    return NextResponse.json({
+      success: true,
+      data: {
+        severity: result.severity,
+        confidence: result.confidence,
+        severity_scores: result.severity_scores,
+        processing_time: result.processing_time
+      }
+    });
+
   } catch (error) {
-    console.error('Error in analyze route:', error);
+    console.error('API Error:', error);
     return NextResponse.json(
-      { success: false, error: 'Internal server error' },
+      { 
+        success: false,
+        error: error instanceof Error ? error.message : 'Internal server error' 
+      },
       { status: 500 }
     );
   }
