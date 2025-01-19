@@ -1,5 +1,5 @@
 "use client";
-import { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import Image from 'next/image';
 import { 
   Upload, 
@@ -7,7 +7,8 @@ import {
   AlertTriangle, 
   Info,
   CheckCircle,
-  AlertCircle 
+  AlertCircle,
+  Camera 
 } from 'lucide-react';
 import { Tooltip } from '@/components/ui/tooltip';
 import './styles/results.css';
@@ -17,6 +18,10 @@ interface AnalysisResult {
   confidence: number;
   severity_scores: Record<string, number>;
   processing_time: number;
+}
+
+interface SeverityScore {
+  [key: string]: number;
 }
 
 const severityColors: Record<string, string> = {
@@ -58,23 +63,31 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [isCapturing, setIsCapturing] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [cameraMode, setCameraMode] = useState<'environment' | 'user'>('environment');
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const [isCameraReady, setCameraReady] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
-  const handleImageSelect = async (file: File) => {
+  const handleImageSelect = useCallback(async (file: File) => {
     // Reset states
     setError(null);
     setAnalysisResult(null);
-
+  
     // Validate file type and size
     if (!file.type.includes('image/')) {
       setError('Please select a valid image file (JPEG, PNG)');
       return;
     }
-
+  
     if (file.size > 10 * 1024 * 1024) {
       setError('Image size must be less than 10MB');
       return;
     }
-
+  
     try {
       setSelectedImage(URL.createObjectURL(file));
       setUploading(true);
@@ -82,24 +95,24 @@ export default function Home() {
       
       const formData = new FormData();
       formData.append('file', file);
-
+  
       const isDev = process.env.NEXT_PUBLIC_APP_ENV === 'development';
       if (isDev) {
         console.log('Running in development mode');
       }
-
+  
       const response = await fetch('/api/analyze', {
         method: 'POST',
         body: formData,
       });
-
+  
       const result = await response.json();
-
+  
       if (!response.ok) {
         console.error('Server response:', result);
         throw new Error(result.error || `Server error: ${response.status}`);
       }
-
+  
       if (result.success && result.result) {
         setAnalysisResult(result.result);
       } else {
@@ -113,17 +126,223 @@ export default function Home() {
       setUploading(false);
       setAnalyzing(false);
     }
-  };
+  }, []);
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     const file = e.dataTransfer.files[0];
+    if (file) handleImageSelect(file);
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
     if (file) handleImageSelect(file);
   };
 
   const formatConfidence = (confidence: number): string => {
     return `${confidence.toFixed(1)}%`;
   };
+
+  const startCamera = useCallback(async () => {
+    try {
+      // First stop any existing streams
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
+
+      const constraints: MediaStreamConstraints = {
+        video: {
+          facingMode: cameraMode,
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+        },
+        audio: false
+      };
+
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        streamRef.current = stream;
+        
+        // Wait for video to be ready
+        await new Promise((resolve) => {
+          if (videoRef.current) {
+            videoRef.current.onloadedmetadata = () => {
+              resolve(true);
+            };
+          }
+        });
+
+        await videoRef.current.play();
+        setIsCameraOpen(true);
+        setCameraReady(true);
+        setCameraError(null);
+      }
+    } catch (err) {
+      console.error('Camera access error:', err);
+      setCameraError('Could not access camera. Please check permissions and try again.');
+      setIsCameraOpen(false);
+      setCameraReady(false);
+    }
+  }, [cameraMode]);
+
+  const stopCamera = useCallback(() => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setIsCameraOpen(false);
+    setCameraReady(false);
+  }, []);
+
+  const captureImage = useCallback(async () => {
+    if (!videoRef.current || !isCameraReady) {
+      setCameraError('Camera is not ready');
+      return;
+    }
+
+    try {
+      setIsCapturing(true);
+      setError(null);
+
+      const video = videoRef.current;
+      const canvas = document.createElement('canvas');
+      
+      // Use actual video dimensions
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Could not get canvas context');
+
+      // Draw current frame
+      ctx.drawImage(video, 0, 0);
+
+      // Convert to blob
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+          (blob) => {
+            if (blob) resolve(blob);
+            else reject(new Error('Failed to capture image'));
+          },
+          'image/jpeg',
+          0.95
+        );
+      });
+
+      const file = new File([blob], 'retina-capture.jpg', {
+        type: 'image/jpeg',
+        lastModified: Date.now(),
+      });
+
+      // Set preview and process image
+      setSelectedImage(URL.createObjectURL(blob));
+      
+      // Stop camera before processing
+      stopCamera();
+      
+      // Process the image
+      await handleImageSelect(file);
+    } catch (error) {
+      console.error('Error capturing:', error);
+      setCameraError('Failed to capture image. Please try again.');
+    } finally {
+      setIsCapturing(false);
+    }
+  }, [isCameraReady, handleImageSelect, stopCamera]);
+
+  const renderSeverityScores = () => {
+    if (!analysisResult?.severity_scores) return null;
+
+    return Object.entries(analysisResult.severity_scores as SeverityScore)
+      .sort(([,a], [,b]) => b - a)
+      .map(([level, score]) => (
+        <div key={level} className="flex items-center gap-2">
+          <span className="score-label">{level}:</span>
+          <div className="progress-bar">
+            <div 
+              className={`progress-bar-fill ${
+                score > CONFIDENCE_THRESHOLDS.HIGH 
+                  ? 'progress-bar-fill-high'
+                  : score > CONFIDENCE_THRESHOLDS.MODERATE 
+                  ? 'progress-bar-fill-moderate'
+                  : 'progress-bar-fill-low'
+              } w-progress-${Math.round((score / 100) * 4) * 25}`}
+            />
+          </div>
+          <span className="score-value">
+            {formatConfidence(score)}
+          </span>
+        </div>
+      ));
+  };
+
+  const renderCamera = useCallback(() => (
+    <div className="space-y-4">
+      <div className="relative aspect-video w-full overflow-hidden rounded-lg bg-black">
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted // Add muted attribute
+          className="w-full h-full object-cover"
+          aria-label="Camera preview"
+        />
+        {!isCameraReady && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+            <Loader2 className="w-8 h-8 animate-spin text-white" />
+            <span className="ml-2 text-white">Starting camera...</span>
+          </div>
+        )}
+        {isCapturing && (
+          <div className="absolute inset-0 bg-white/90 flex items-center justify-center">
+            <Loader2 className="w-8 h-8 animate-spin text-gray-700" />
+            <span className="ml-2 text-gray-700">Capturing...</span>
+          </div>
+        )}
+      </div>
+
+      <div className="flex justify-center gap-4">
+        <button
+          onClick={captureImage}
+          disabled={!isCameraReady || isCapturing}
+          className={`
+            inline-flex items-center gap-2 px-6 py-3 rounded-full
+            ${!isCameraReady || isCapturing
+              ? 'bg-gray-400 cursor-not-allowed'
+              : 'bg-green-500 hover:bg-green-600 active:scale-95'
+            }
+            text-white font-medium transition-all transform
+          `}
+          aria-label="Capture photo"
+        >
+          {isCapturing ? (
+            <>
+              <Loader2 className="w-5 h-5 animate-spin" />
+              <span>Capturing...</span>
+            </>
+          ) : (
+            <>
+              <Camera className="w-5 h-5" />
+              <span>Capture Photo</span>
+            </>
+          )}
+        </button>
+
+        <button
+          onClick={stopCamera}
+          className="inline-flex items-center gap-2 px-6 py-3 bg-gray-500 hover:bg-gray-600 text-white font-medium rounded-full transition-colors"
+          aria-label="Stop camera"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  ), [isCameraReady, isCapturing, captureImage, stopCamera]);
 
   return (
     <div className="min-h-screen p-8 bg-gray-50">
@@ -134,79 +353,104 @@ export default function Home() {
         </header>
 
         <section className="bg-white p-8 rounded-lg shadow-lg">
-          <div
-            className={`
-              border-2 border-dashed rounded-lg p-12 text-center transition-colors
-              ${error ? 'border-red-300 bg-red-50' : 'border-gray-300 hover:border-blue-400'}
-            `}
-            onDrop={handleDrop}
-            onDragOver={(e) => e.preventDefault()}
-          >
-            <input
-              type="file"
-              accept="image/*"
-              className="hidden"
-              ref={fileInputRef}
-              title="Select Image"
-              onChange={(e) => e.target.files?.[0] && handleImageSelect(e.target.files[0])}
-            />
-            
-            {selectedImage ? (
-              <div className="space-y-4">
-                <div className="relative h-64 w-full">
-                  <Image
-                    src={selectedImage}
-                    alt="Selected retinal image"
-                    fill
-                    className="object-contain rounded-lg"
-                  />
+          {isCameraOpen ? renderCamera() : (
+            <div
+              className={`
+                border-2 border-dashed rounded-lg p-12 text-center transition-colors
+                ${error ? 'border-red-300 bg-red-50' : 'border-gray-300 hover:border-blue-400'}
+              `}
+              onDrop={handleDrop}
+              onDragOver={(e) => e.preventDefault()}
+            >
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                ref={fileInputRef}
+                title="Select Image"
+                onChange={handleFileChange}
+              />
+              
+              {selectedImage ? (
+                <div className="space-y-4">
+                  <div className="relative h-64 w-full">
+                    <Image
+                      src={selectedImage}
+                      alt="Selected retinal image"
+                      fill
+                      className="object-contain rounded-lg"
+                    />
+                  </div>
+                  <button 
+                    className={`
+                      inline-flex items-center gap-2 px-6 py-3 rounded-full
+                      ${uploading 
+                        ? 'bg-gray-400 cursor-not-allowed' 
+                        : 'bg-blue-500 hover:bg-blue-600'
+                      } 
+                      text-white font-medium transition-colors
+                    `}
+                    onClick={() => inputRef.current?.click()}
+                    disabled={uploading || analyzing}
+                  >
+                    {uploading ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        <span>Processing...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Camera className="w-5 h-5" />
+                        <span>Take Another Photo</span>
+                      </>
+                    )}
+                  </button>
                 </div>
-                <button 
-                  className={`
-                    inline-flex items-center gap-2 px-6 py-3 rounded-full
-                    ${uploading 
-                      ? 'bg-gray-400 cursor-not-allowed' 
-                      : 'bg-blue-500 hover:bg-blue-600'
-                    } 
-                    text-white font-medium transition-colors
-                  `}
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={uploading || analyzing}
-                >
-                  {uploading ? (
-                    <>
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                      <span>Processing...</span>
-                    </>
-                  ) : (
-                    <>
+              ) : (
+                <div className="space-y-4">
+                  <Upload className="w-12 h-12 mx-auto text-gray-400" />
+                  <div>
+                    <p className="text-gray-600">
+                      Take a photo or upload a retinal image
+                    </p>
+                    <p className="text-sm text-gray-500 mt-2">
+                      Supported formats: JPEG, PNG (max 10MB)
+                    </p>
+                  </div>
+                  <div className="flex justify-center gap-4">
+                    <button 
+                      className="inline-flex items-center gap-2 px-6 py-3 bg-blue-500 hover:bg-blue-600 text-white font-medium rounded-full transition-colors"
+                      onClick={() => fileInputRef.current?.click()}
+                      aria-label="Select image file"
+                    >
                       <Upload className="w-5 h-5" />
-                      <span>Select Another Image</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <Upload className="w-12 h-12 mx-auto text-gray-400" />
-                <div>
-                  <p className="text-gray-600">
-                    Drag and drop your retinal image here, or click to select
-                  </p>
-                  <p className="text-sm text-gray-500 mt-2">
-                    Supported formats: JPEG, PNG (max 10MB)
-                  </p>
+                      <span>Select Image</span>
+                    </button>
+                    <button 
+                      className="inline-flex items-center gap-2 px-6 py-3 bg-green-500 hover:bg-green-600 text-white font-medium rounded-full transition-colors"
+                      onClick={() => {
+                        setIsCameraOpen(true);
+                        startCamera();
+                      }}
+                      aria-label="Start camera"
+                    >
+                      <Camera className="w-5 h-5" />
+                      <span>Use Camera</span>
+                    </button>
+                  </div>
                 </div>
-                <button 
-                  className="inline-flex items-center gap-2 px-6 py-3 bg-blue-500 hover:bg-blue-600 text-white font-medium rounded-full transition-colors"
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <Upload className="w-5 h-5" />
-                  <span>Select Image</span>
-                </button>
+              )}
+            </div>
+          )}
+
+          {cameraError && (
+            <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+              <div className="flex items-center gap-2 text-red-700">
+                <AlertTriangle className="w-5 h-5" />
+                <p>{cameraError}</p>
               </div>
-            )}
-          </div>
+            </div>
+          )}
 
           {error && (
             <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
@@ -266,27 +510,7 @@ export default function Home() {
                         </Tooltip>
                       </h3>
                       <div className="space-y-3">
-                        {Object.entries(analysisResult.severity_scores)
-                          .sort(([,a], [,b]) => b - a)
-                          .map(([level, score]) => (
-                            <div key={level} className="flex items-center gap-2">
-                              <span className="score-label">{level}:</span>
-                              <div className="progress-bar">
-                                <div 
-                                  className={`progress-bar-fill ${
-                                    score > CONFIDENCE_THRESHOLDS.HIGH 
-                                      ? 'progress-bar-fill-high'
-                                      : score > CONFIDENCE_THRESHOLDS.MODERATE 
-                                      ? 'progress-bar-fill-moderate'
-                                      : 'progress-bar-fill-low'
-                                  } w-progress-${Math.round((score / 100) * 4) * 25}`}
-                                />
-                              </div>
-                              <span className="score-value">
-                                {formatConfidence(score)}
-                              </span>
-                            </div>
-                        ))}
+                        {renderSeverityScores()}
                       </div>
                     </div>
                   )}
