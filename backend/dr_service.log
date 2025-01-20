@@ -75,3 +75,21 @@
 2025-01-19 22:25:52,775 - __main__ - WARNING - Model file not found at /home/kasinadhsarma/dr-detection/backend/models/dr_classification_model.h5. Using mock model.
 2025-01-19 22:25:52,781 - __main__ - INFO - Starting DR Detection API server...
 2025-01-19 22:25:52,802 - main - WARNING - Model file not found at /home/kasinadhsarma/dr-detection/backend/models/dr_classification_model.h5. Using mock model.
+2025-01-20 21:30:18,916 - __main__ - WARNING - Model file not found at /home/kasinadhsarma/dr-detection/backend/models/dr_classification_model.h5. Using mock model.
+2025-01-20 21:30:18,924 - __main__ - INFO - Starting DR Detection API server...
+2025-01-20 21:30:18,962 - main - WARNING - Model file not found at /home/kasinadhsarma/dr-detection/backend/models/dr_classification_model.h5. Using mock model.
+2025-01-20 21:30:43,812 - main - INFO - Processing image: 13_right.jpeg
+2025-01-20 21:30:43,900 - main - INFO - Successfully processed image: 13_right.jpeg
+2025-01-20 21:30:55,664 - main - INFO - Processing image: 13_right.jpeg
+2025-01-20 21:30:55,769 - main - INFO - Duplicate image detected, returning cached result
+2025-01-20 21:30:55,769 - main - INFO - Successfully processed image: 13_right.jpeg
+2025-01-20 21:31:08,890 - main - INFO - Processing image: 15_left.jpeg
+2025-01-20 21:31:09,119 - main - INFO - Successfully processed image: 15_left.jpeg
+2025-01-20 21:31:19,214 - main - INFO - Processing image: 15_left.jpeg
+2025-01-20 21:31:19,471 - main - INFO - Duplicate image detected, returning cached result
+2025-01-20 21:31:19,471 - main - INFO - Successfully processed image: 15_left.jpeg
+2025-01-20 21:32:21,212 - main - INFO - Processing image: 15_right.jpeg
+2025-01-20 21:32:21,461 - main - INFO - Successfully processed image: 15_right.jpeg
+2025-01-20 21:32:31,585 - main - INFO - Processing image: 15_right.jpeg
+2025-01-20 21:32:31,835 - main - INFO - Duplicate image detected, returning cached result
+2025-01-20 21:32:31,835 - main - INFO - Successfully processed image: 15_right.jpeg

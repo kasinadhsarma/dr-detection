@@ -88,6 +88,8 @@ class DRModel:
         ]
         self.input_shape = (224, 224)
         self.model_path = Path(__file__).resolve().parent / 'models' / 'dr_classification_model.h5'
+        self._last_prediction = None
+        self._last_image_hash = None
         self.load_model()
 
     def load_model(self):
@@ -110,30 +112,43 @@ class DRModel:
         try:
             # Convert bytes to PIL Image
             image = Image.open(io.BytesIO(image_bytes))
-            
+
             # Convert to RGB if needed
             if image.mode != 'RGB':
                 image = image.convert('RGB')
-            
+
             # Resize
             image = image.resize(self.input_shape)
-            
+
             # Convert to numpy array and normalize
             img_array = np.array(image)
             img_array = img_array.astype('float32') / 255.0
-            
+
             # Add batch dimension
             img_array = np.expand_dims(img_array, axis=0)
-            
+
             return img_array
 
         except Exception as e:
             logger.error(f"Preprocessing error: {str(e)}")
             raise ValueError(f"Error preprocessing image: {str(e)}")
 
-    def predict(self, preprocessed_image):
-        """Make prediction using the model"""
+    def _get_image_hash(self, image_bytes):
+        """Generate a hash for the image to detect duplicates"""
+        import hashlib
+        return hashlib.md5(image_bytes).hexdigest()
+
+    def predict(self, preprocessed_image, image_bytes=None):
+        """Make prediction using the model with duplicate detection"""
         try:
+            # Check for duplicate image
+            if image_bytes:
+                current_hash = self._get_image_hash(image_bytes)
+                if current_hash == self._last_image_hash:
+                    logger.info("Duplicate image detected, returning cached result")
+                    return self._last_prediction
+                self._last_image_hash = current_hash
+
             start_time = datetime.now()
             
             if self.model == "mock":
@@ -157,12 +172,16 @@ class DRModel:
 
             processing_time = (datetime.now() - start_time).total_seconds()
 
-            return {
+            result = {
                 'severity': self.severity_labels[predicted_class],
                 'confidence': confidence * 100,  # Convert to percentage
                 'severity_scores': severity_scores,
                 'processing_time': processing_time
             }
+
+            # Cache the result
+            self._last_prediction = result
+            return result
 
         except Exception as e:
             logger.error(f"Prediction error: {str(e)}")
@@ -200,7 +219,7 @@ async def model_info():
     """Get model information"""
     if dr_model.model is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
-    
+
     return ModelInfo(
         model_loaded=True,
         input_shape=dr_model.input_shape,
@@ -227,16 +246,14 @@ async def predict_image(file: UploadFile = File(...)):
                 detail="File must be an image (JPEG, PNG)"
             )
         
-        # Read file
+        # Read file once
         contents = await file.read()
         
-        # Process image and make prediction
         try:
             preprocessed_image = dr_model.preprocess_image(contents)
-            result = dr_model.predict(preprocessed_image)
+            result = dr_model.predict(preprocessed_image, contents)
             
             logger.info(f"Successfully processed image: {file.filename}")
-            
             return JSONResponse(
                 content={
                     "success": True,
@@ -256,21 +273,21 @@ async def predict_image(file: UploadFile = File(...)):
 async def batch_predict(files: List[UploadFile] = File(...)):
     """
     Make predictions for multiple images
-    
+
     Parameters:
     - files: List of image files
-    
+
     Returns:
     - List of predictions and any failed images
     """
     try:
         if dr_model.model is None:
             raise HTTPException(status_code=503, detail="Model not loaded")
-        
+
         start_time = datetime.now()
         predictions = []
         failed_images = []
-        
+
         for file in files:
             try:
                 contents = await file.read()
@@ -280,9 +297,9 @@ async def batch_predict(files: List[UploadFile] = File(...)):
             except Exception as e:
                 logger.error(f"Error processing {file.filename}: {str(e)}")
                 failed_images.append(file.filename)
-        
+
         total_time = (datetime.now() - start_time).total_seconds()
-        
+
         return BatchPredictionResponse(
             predictions=predictions,
             failed_images=failed_images,
@@ -323,17 +340,17 @@ if __name__ == "__main__":
         reload_excludes=["*.pyc", "*.log"],  # Exclude unnecessary files
         reload_includes=["*.py", "*.html", "*.css", "*.js"]  # Include only needed files
     )
-    
+
     server = uvicorn.Server(config)
-    
+
     # Handle graceful shutdown
     def handle_exit(signum, frame):
         logger.info(f"Received signal {signum}. Shutting down gracefully...")
         sys.exit(0)
-    
+
     signal.signal(signal.SIGINT, handle_exit)
     signal.signal(signal.SIGTERM, handle_exit)
-    
+
     try:
         logger.info("Starting DR Detection API server...")
         server.run()
