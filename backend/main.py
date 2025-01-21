@@ -1,3 +1,5 @@
+import os
+from pathlib import Path
 from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -9,16 +11,16 @@ import cv2
 import io
 from PIL import Image
 import uvicorn
-import os
 from datetime import datetime
 import logging
 import json
 import signal
 import sys
+from backend.train import load_model  # Use absolute import
+from backend.pipeline import main as train_model  # Use absolute import
 
 # Load environment variables
 from dotenv import load_dotenv
-from pathlib import Path
 
 # Load environment variables from the project root .env.local
 load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / '.env.local')
@@ -42,9 +44,15 @@ app = FastAPI(
 )
 
 # Update CORS middleware configuration
+origins = [
+    "http://localhost",
+    "http://localhost:3000",
+    # Add other origins as needed
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # For development, update for production
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -217,39 +225,25 @@ async def predict_options():
 async def predict_image(file: UploadFile = File(...)):
     """Make prediction for a single image"""
     try:
-        # Log request details
-        logger.info(f"Processing image: {file.filename}")
-        
-        # Validate file type
-        if not file.content_type.startswith('image/'):
-            raise HTTPException(
-                status_code=400,
-                detail="File must be an image (JPEG, PNG)"
-            )
-        
-        # Read file
+        logging.info("Loading the trained model...")
+        model = load_model('best_model.h5')
+        logging.info("Model loaded successfully.")
+
+        logging.info("Predicting DR level for the uploaded image...")
         contents = await file.read()
-        
-        # Process image and make prediction
-        try:
-            preprocessed_image = dr_model.preprocess_image(contents)
-            result = dr_model.predict(preprocessed_image)
-            
-            logger.info(f"Successfully processed image: {file.filename}")
-            
-            return JSONResponse(
-                content={
-                    "success": True,
-                    "data": result
-                }
-            )
-            
-        except ValueError as e:
-            logger.error(f"Error processing image: {str(e)}")
-            raise HTTPException(status_code=400, detail=str(e))
-            
+        nparr = np.frombuffer(contents, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img = cv2.resize(img, (224, 224))
+        img = img.astype(np.float32) / 255.0
+        img = np.expand_dims(img, axis=0)
+
+        prediction = model.predict(img)
+        predicted_level = np.argmax(prediction, axis=1)[0]
+        logging.info(f'Predicted DR level: {predicted_level}')
+        return {"predicted_level": predicted_level}
     except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}")
+        logging.error(f"An error occurred during prediction: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/batch_predict", tags=["Prediction"], response_model=BatchPredictionResponse)
@@ -293,15 +287,14 @@ async def batch_predict(files: List[UploadFile] = File(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/train", tags=["Model"])
-async def train_model(background_tasks: BackgroundTasks):
-    """Initialize or retrain the model"""
+async def train(data_dir: str):
     try:
-        return {
-            "message": "Training initiated",
-            "status": "success",
-            "note": "Currently using mock predictions. Implement real training logic."
-        }
+        logging.info("Starting model training...")
+        accuracy = train_model(data_dir)
+        logging.info(f"Model training completed with accuracy: {accuracy}")
+        return {"message": "Model training completed successfully.", "accuracy": accuracy}
     except Exception as e:
+        logging.error(f"An error occurred during training: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Add shutdown event handler

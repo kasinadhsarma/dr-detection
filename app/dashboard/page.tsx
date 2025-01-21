@@ -2,7 +2,7 @@
 import React, { useState, useRef, useCallback } from 'react';
 import Image from 'next/image';
 import { Upload, Loader2, AlertTriangle, Info, CheckCircle, AlertCircle, Camera } from 'lucide-react';
-import { Tooltip } from '@/components/ui/tooltip';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import '../styles/dashboard.css';
 import { ProgressRing } from '@/components/ui/ProgressRing';
 import { AnalysisResponse, AnalysisData } from '@/types/analysis';
@@ -419,9 +419,16 @@ const Dashboard: React.FC = () => {
           <div className="mt-4 pt-4 border-t">
             <h3 className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
               Detailed Scores
-              <Tooltip tooltip="Confidence scores for each severity level">
-                <Info className="confidence-indicator" />
-              </Tooltip>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger>
+                    <Info className="confidence-indicator" />
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Confidence scores for each severity level</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             </h3>
             <div className="space-y-3">
               {renderSeverityScores()}
