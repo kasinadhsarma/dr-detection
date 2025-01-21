@@ -25,9 +25,15 @@ export default function ConfigPage() {
         body: JSON.stringify(settings),
       });
       // Show success message
+      alert('Settings saved successfully!');
     } catch (error) {
       console.error('Failed to save settings:', error);
+      alert('Failed to save settings. Please try again.');
     }
+  };
+
+  const handleReset = () => {
+    window.location.reload();
   };
 
   return (
@@ -124,7 +130,7 @@ export default function ConfigPage() {
           {/* Actions */}
           <div className="flex justify-end gap-4 pt-4 border-t">
             <button
-              onClick={() => window.location.reload()}
+              onClick={handleReset}
               className="flex items-center gap-2 px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-md"
             >
               <RotateCcw className="w-4 h-4" />
