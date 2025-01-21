@@ -17,20 +17,33 @@ export function SignupForm() {
     confirmPassword: '',
   })
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setIsLoading(true)
-    
-    try {
-      // Add your registration logic here
-      // For example: await register(formData)
-      router.push('/dashboard')
-    } catch (error) {
-      console.error(error)
-    } finally {
-      setIsLoading(false)
-    }
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault()
+  setIsLoading(true)
+
+  if (!formData.name || !formData.email || !formData.password || !formData.confirmPassword) {
+    alert('Please fill in all fields')
+    setIsLoading(false)
+    return
   }
+
+  if (formData.password !== formData.confirmPassword) {
+    alert('Passwords do not match')
+    setIsLoading(false)
+    return
+  }
+
+  try {
+    // Add your registration logic here
+    // For example: await register(formData)
+    router.push('/dashboard')
+  } catch (error) {
+    console.error(error)
+    alert('Registration failed. Please try again.')
+  } finally {
+    setIsLoading(false)
+  }
+}
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">

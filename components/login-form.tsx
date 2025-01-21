@@ -15,20 +15,27 @@ export function LoginForm() {
     password: '',
   })
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setIsLoading(true)
-    
-    try {
-      // Add your authentication logic here
-      // For example: await signIn(formData.email, formData.password)
-      router.push('/dashboard')
-    } catch (error) {
-      console.error(error)
-    } finally {
-      setIsLoading(false)
-    }
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault()
+  setIsLoading(true)
+
+  if (!formData.email || !formData.password) {
+    alert('Please fill in all fields')
+    setIsLoading(false)
+    return
   }
+
+  try {
+    // Add your authentication logic here
+    // For example: await signIn(formData.email, formData.password)
+    router.push('/dashboard')
+  } catch (error) {
+    console.error(error)
+    alert('Authentication failed. Please try again.')
+  } finally {
+    setIsLoading(false)
+  }
+}
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
